@@ -1,0 +1,3 @@
+[submodule "extern/JupyterPlugin"]
+	path = extern/JupyterPlugin
+	url = https://github.com/ManiVaultStudio/JupyterPlugin.git
