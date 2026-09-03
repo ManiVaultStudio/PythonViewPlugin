@@ -3,11 +3,14 @@
 #include "PythonRuntime.h"
 
 #include <Application.h>
+#include <DatasetsMimeData.h>
 #include <PointData/PointData.h>
+#include <widgets/DropWidget.h>
 
 #include <QCoreApplication>
 #include <QDir>
 #include <QFileInfo>
+#include <QMimeData>
 #include <QVBoxLayout>
 #include <QWebEngineView>
 
@@ -18,14 +21,68 @@ using namespace mv::plugin;
 
 PythonViewPlugin::PythonViewPlugin(const PluginFactory* factory) :
     ViewPlugin(factory),
-    _webView(new QWebEngineView(&getWidget()))
+    _webView(new QWebEngineView(&getWidget())),
+    _dropWidget(new gui::DropWidget(_webView))
 {
     setObjectName("PythonView");
+
+    _webView->setAcceptDrops(true);
 
     auto* layout = new QVBoxLayout();
     layout->setContentsMargins(0, 0, 0, 0);
     layout->addWidget(_webView);
     getWidget().setLayout(layout);
+
+    _dropWidget->setDropIndicatorWidget(new gui::DropWidget::DropIndicatorWidget(
+        _webView,
+        "No data loaded",
+        "Drag a points dataset from the data hierarchy and drop it here"
+    ));
+
+    _dropWidget->initialize([this](const QMimeData* mimeData) -> gui::DropWidget::DropRegions {
+        gui::DropWidget::DropRegions dropRegions;
+        const auto* datasetsMimeData = dynamic_cast<const DatasetsMimeData*>(mimeData);
+
+        if (!datasetsMimeData)
+            return dropRegions;
+
+        if (datasetsMimeData->getDatasetsCount() != 1) {
+            dropRegions << new gui::DropWidget::DropRegion(
+                this,
+                "Unsupported drop",
+                "Drop exactly one points dataset",
+                "exclamation-circle",
+                false
+            );
+            return dropRegions;
+        }
+
+        const auto& candidateDataset = datasetsMimeData->getDatasetsRef().first();
+        if (!candidateDataset.isValid() || candidateDataset->getDataType() != PointType) {
+            dropRegions << new gui::DropWidget::DropRegion(
+                this,
+                "Incompatible data",
+                "Only points datasets are supported",
+                "exclamation-circle",
+                false
+            );
+            return dropRegions;
+        }
+
+        const auto datasetName = candidateDataset->getGuiName();
+        dropRegions << new gui::DropWidget::DropRegion(
+            this,
+            "Points",
+            QString("Visualize %1 with Python").arg(datasetName),
+            "map-marker-alt",
+            true,
+            [this, candidateDataset]() {
+                loadData({ candidateDataset });
+            }
+        );
+
+        return dropRegions;
+    });
 }
 
 void PythonViewPlugin::init()
@@ -47,6 +104,7 @@ void PythonViewPlugin::loadData(const Datasets& datasets)
         return;
 
     _dataset = datasets.front();
+    _dropWidget->setShowDropIndicator(false);
     render();
 }
 

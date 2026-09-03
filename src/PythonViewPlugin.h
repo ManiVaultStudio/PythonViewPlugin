@@ -7,6 +7,10 @@
 
 class QWebEngineView;
 
+namespace mv::gui {
+    class DropWidget;
+}
+
 class PythonViewPlugin final : public mv::plugin::ViewPlugin
 {
     Q_OBJECT
@@ -23,6 +27,7 @@ private:
     void showError(const QString& title, const QString& details);
 
     QWebEngineView* _webView = nullptr;
+    mv::gui::DropWidget* _dropWidget = nullptr;
     mv::Dataset<mv::DatasetImpl> _dataset;
     QString _scriptPath;
 };
