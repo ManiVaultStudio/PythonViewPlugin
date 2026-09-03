@@ -22,22 +22,30 @@ using namespace mv::plugin;
 PythonViewPlugin::PythonViewPlugin(const PluginFactory* factory) :
     ViewPlugin(factory),
     _webView(new QWebEngineView(&getWidget())),
-    _dropWidget(new gui::DropWidget(_webView))
+    _dropWidget(new gui::DropWidget(&getWidget()))
 {
     setObjectName("PythonView");
 
-    _webView->setAcceptDrops(true);
+    // Let the native parent receive dataset drags. QWebEngineView otherwise
+    // handles them as browser drops before ManiVault's DropWidget sees them.
+    _webView->setAcceptDrops(false);
+    getWidget().setAcceptDrops(true);
 
     auto* layout = new QVBoxLayout();
     layout->setContentsMargins(0, 0, 0, 0);
     layout->addWidget(_webView);
     getWidget().setLayout(layout);
 
-    _dropWidget->setDropIndicatorWidget(new gui::DropWidget::DropIndicatorWidget(
-        _webView,
+    auto* dropIndicatorWidget = new gui::DropWidget::DropIndicatorWidget(
+        &getWidget(),
         "No data loaded",
         "Drag a points dataset from the data hierarchy and drop it here"
-    ));
+    );
+    _dropWidget->setDropIndicatorWidget(dropIndicatorWidget);
+    dropIndicatorWidget->show();
+    dropIndicatorWidget->raise();
+    _dropWidget->show();
+    _dropWidget->raise();
 
     _dropWidget->initialize([this](const QMimeData* mimeData) -> gui::DropWidget::DropRegions {
         gui::DropWidget::DropRegions dropRegions;
