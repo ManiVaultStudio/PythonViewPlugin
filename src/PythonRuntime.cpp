@@ -1,9 +1,13 @@
 #include "PythonRuntime.h"
 #include "PythonBuildConfig.h"
 
+#include <QCoreApplication>
+#include <QDir>
 #include <QFileInfo>
+#include <QWidget>
 
 #include <stdexcept>
+#include <cstdint>
 
 #undef slots
 #include <MVData.h>
@@ -86,6 +90,12 @@ bool PythonRuntime::initialize(QString* error)
         }
 
         py::gil_scoped_acquire acquire;
+        const auto pythonDllDirectory = QDir(QCoreApplication::applicationDirPath())
+            .filePath("PluginDependencies/PythonViewPlugin/PythonDLLs")
+            .toStdString();
+        py::module_::import("sys").attr("path").attr("insert")(0, pythonDllDirectory);
+        const auto site = py::module_::import("site");
+        site.attr("addsitedir")(PYTHON_VIEW_USER_SITE_PACKAGES);
         py::module_::import("mvstudio_core");
         return true;
     }
@@ -165,4 +175,65 @@ PythonRenderResult PythonRuntime::render(const QString& scriptPath, const QVaria
     }
 
     return result;
+}
+
+QWidget* PythonRuntime::createWidget(const QString& scriptPath, const QVariantMap& context, QString* error)
+{
+    std::lock_guard lock(_mutex);
+
+    QString initializationError;
+    if (!initialize(&initializationError)) {
+        if (error)
+            *error = initializationError;
+        return nullptr;
+    }
+
+    try {
+        py::gil_scoped_acquire acquire;
+        py::dict globals;
+        globals["__builtins__"] = py::module_::import("builtins");
+        globals["__file__"] = scriptPath.toStdString();
+        globals["__name__"] = "manivault_python_view";
+        py::eval_file(scriptPath.toStdString(), globals, globals);
+
+        if (!globals.contains("create_view"))
+            throw std::runtime_error("Python view script must define create_view(context)");
+
+        py::object widgetObject = globals["create_view"](toPythonDictionary(context));
+        const auto qtWidgets = py::module_::import("PySide6.QtWidgets");
+        if (!py::isinstance(widgetObject, qtWidgets.attr("QWidget")))
+            throw std::runtime_error("create_view(context) must return a PySide6 QWidget");
+
+        const auto shiboken = py::module_::import("shiboken6").attr("Shiboken");
+        const auto pointerValue = shiboken.attr("getCppPointer")(widgetObject)[0].cast<std::uintptr_t>();
+        auto* widget = reinterpret_cast<QWidget*>(pointerValue);
+        if (!widget)
+            throw std::runtime_error("PySide6 returned a null QWidget pointer");
+
+        widgetObject.inc_ref();
+        _widgetOwners[widget] = widgetObject.ptr();
+        return widget;
+    }
+    catch (const py::error_already_set& exception) {
+        if (error)
+            *error = QString::fromUtf8(exception.what());
+    }
+    catch (const std::exception& exception) {
+        if (error)
+            *error = QString::fromUtf8(exception.what());
+    }
+
+    return nullptr;
+}
+
+void PythonRuntime::releaseWidget(QWidget* widget)
+{
+    std::lock_guard lock(_mutex);
+    const auto owner = _widgetOwners.find(widget);
+    if (owner == _widgetOwners.end())
+        return;
+
+    py::gil_scoped_acquire acquire;
+    py::handle(static_cast<PyObject*>(owner->second)).dec_ref();
+    _widgetOwners.erase(owner);
 }

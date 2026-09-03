@@ -5,6 +5,9 @@
 
 #include <memory>
 #include <mutex>
+#include <unordered_map>
+
+class QWidget;
 
 namespace pybind11 {
     class scoped_interpreter;
@@ -36,11 +39,14 @@ public:
 
     bool initialize(QString* error = nullptr);
     PythonRenderResult render(const QString& scriptPath, const QVariantMap& context);
+    QWidget* createWidget(const QString& scriptPath, const QVariantMap& context, QString* error = nullptr);
+    void releaseWidget(QWidget* widget);
 
 private:
     PythonRuntime() = default;
     ~PythonRuntime();
 
     std::unique_ptr<pybind11::scoped_interpreter> _ownedInterpreter;
+    std::unordered_map<QWidget*, void*> _widgetOwners;
     std::recursive_mutex _mutex;
 };

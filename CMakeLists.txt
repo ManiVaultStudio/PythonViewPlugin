@@ -12,13 +12,25 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_INCLUDE_CURRENT_DIR ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-find_package(Qt6 COMPONENTS Widgets WebEngineWidgets REQUIRED)
+find_package(Qt6 COMPONENTS Network Widgets REQUIRED)
 find_package(ManiVault COMPONENTS Core PointData ClusterData ImageData CONFIG QUIET)
 find_package(Python COMPONENTS Development Interpreter REQUIRED)
 
 mv_project_defaults()
 
 get_filename_component(PYTHON_VIEW_PYTHON_HOME "${Python_EXECUTABLE}" DIRECTORY)
+execute_process(
+    COMMAND "${Python_EXECUTABLE}" -c "import site; print(site.getusersitepackages(), end='')"
+    RESULT_VARIABLE PYTHON_VIEW_USER_SITE_RESULT
+    OUTPUT_VARIABLE PYTHON_VIEW_USER_SITE_PACKAGES
+    ERROR_VARIABLE PYTHON_VIEW_USER_SITE_ERROR
+)
+if(NOT PYTHON_VIEW_USER_SITE_RESULT EQUAL 0 OR PYTHON_VIEW_USER_SITE_PACKAGES STREQUAL "")
+    message(FATAL_ERROR
+        "Unable to determine Python's user site-packages directory: "
+        "${PYTHON_VIEW_USER_SITE_ERROR}")
+endif()
+file(TO_CMAKE_PATH "${PYTHON_VIEW_USER_SITE_PACKAGES}" PYTHON_VIEW_USER_SITE_PACKAGES)
 configure_file(
     "${CMAKE_CURRENT_SOURCE_DIR}/src/PythonBuildConfig.h.in"
     "${CMAKE_CURRENT_BINARY_DIR}/generated/PythonBuildConfig.h"
@@ -66,7 +78,7 @@ set_target_properties(${PROJECT_NAME} PROPERTIES
 
 target_link_libraries(${PROJECT_NAME} PRIVATE
     Qt6::Widgets
-    Qt6::WebEngineWidgets
+    Qt6::Network
     ManiVault::Core
     ManiVault::PointData
     ManiVault::ClusterData
@@ -95,6 +107,10 @@ install(FILES examples/basic_view.py
 if(WIN32)
     install(FILES "$<TARGET_FILE:Python::Python>"
         DESTINATION PluginDependencies/${PROJECT_NAME}
+        COMPONENT PYTHON_RUNTIME
+    )
+    install(DIRECTORY "${PYTHON_VIEW_PYTHON_HOME}/DLLs/"
+        DESTINATION PluginDependencies/${PROJECT_NAME}/PythonDLLs
         COMPONENT PYTHON_RUNTIME
     )
 endif()

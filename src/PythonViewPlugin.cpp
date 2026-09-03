@@ -10,9 +10,10 @@
 #include <QCoreApplication>
 #include <QDir>
 #include <QFileInfo>
+#include <QLabel>
 #include <QMimeData>
 #include <QVBoxLayout>
-#include <QWebEngineView>
+#include <QWidget>
 
 Q_PLUGIN_METADATA(IID "studio.manivault.PythonViewPlugin")
 
@@ -21,19 +22,20 @@ using namespace mv::plugin;
 
 PythonViewPlugin::PythonViewPlugin(const PluginFactory* factory) :
     ViewPlugin(factory),
-    _webView(new QWebEngineView(&getWidget())),
+    _viewContainer(new QWidget(&getWidget())),
     _dropWidget(new gui::DropWidget(&getWidget()))
 {
     setObjectName("PythonView");
 
-    // Let the native parent receive dataset drags. QWebEngineView otherwise
-    // handles them as browser drops before ManiVault's DropWidget sees them.
-    _webView->setAcceptDrops(false);
+    _viewContainer->hide();
     getWidget().setAcceptDrops(true);
+
+    auto* viewLayout = new QVBoxLayout(_viewContainer);
+    viewLayout->setContentsMargins(0, 0, 0, 0);
 
     auto* layout = new QVBoxLayout();
     layout->setContentsMargins(0, 0, 0, 0);
-    layout->addWidget(_webView);
+    layout->addWidget(_viewContainer);
     getWidget().setLayout(layout);
 
     auto* dropIndicatorWidget = new gui::DropWidget::DropIndicatorWidget(
@@ -93,6 +95,14 @@ PythonViewPlugin::PythonViewPlugin(const PluginFactory* factory) :
     });
 }
 
+PythonViewPlugin::~PythonViewPlugin()
+{
+    if (_pythonWidget) {
+        delete _pythonWidget;
+        PythonRuntime::instance().releaseWidget(_pythonWidget);
+    }
+}
+
 void PythonViewPlugin::init()
 {
     _scriptPath = defaultScriptPath();
@@ -103,7 +113,6 @@ void PythonViewPlugin::init()
         return;
     }
 
-    render();
 }
 
 void PythonViewPlugin::loadData(const Datasets& datasets)
@@ -113,6 +122,8 @@ void PythonViewPlugin::loadData(const Datasets& datasets)
 
     _dataset = datasets.front();
     _dropWidget->setShowDropIndicator(false);
+    _viewContainer->show();
+    _dropWidget->raise();
     render();
 }
 
@@ -127,13 +138,23 @@ void PythonViewPlugin::render()
     context.insert("dataset_id", _dataset.isValid() ? _dataset.getDatasetId() : QString());
     context.insert("dataset_name", _dataset.isValid() ? _dataset->getGuiName() : QString());
 
-    const auto result = PythonRuntime::instance().render(_scriptPath, context);
-    if (!result.success) {
-        showError("Python rendering failed", result.traceback + "\n" + result.standardError);
+    if (_pythonWidget) {
+        _viewContainer->layout()->removeWidget(_pythonWidget);
+        delete _pythonWidget;
+        PythonRuntime::instance().releaseWidget(_pythonWidget);
+        _pythonWidget = nullptr;
+    }
+
+    QString error;
+    _pythonWidget = PythonRuntime::instance().createWidget(_scriptPath, context, &error);
+    if (!_pythonWidget) {
+        showError("Python rendering failed", error);
         return;
     }
 
-    _webView->setHtml(result.html, QUrl::fromLocalFile(QFileInfo(_scriptPath).absolutePath() + QDir::separator()));
+    _pythonWidget->setParent(_viewContainer);
+    _viewContainer->layout()->addWidget(_pythonWidget);
+    _pythonWidget->show();
 }
 
 QString PythonViewPlugin::defaultScriptPath() const
@@ -145,10 +166,14 @@ void PythonViewPlugin::showError(const QString& title, const QString& details)
 {
     const auto escapedTitle = title.toHtmlEscaped();
     const auto escapedDetails = details.toHtmlEscaped();
-    _webView->setHtml(QStringLiteral(
-        "<!doctype html><html><body style='font-family:sans-serif;padding:24px'>"
-        "<h2>%1</h2><pre style='white-space:pre-wrap'>%2</pre></body></html>")
-        .arg(escapedTitle, escapedDetails));
+    auto* errorWidget = new QWidget(_viewContainer);
+    auto* errorLayout = new QVBoxLayout(errorWidget);
+    auto* errorLabel = new QLabel(QString("<h2>%1</h2><pre>%2</pre>").arg(escapedTitle, escapedDetails));
+    errorLabel->setTextFormat(Qt::RichText);
+    errorLabel->setWordWrap(true);
+    errorLayout->addWidget(errorLabel);
+    _viewContainer->layout()->addWidget(errorWidget);
+    _viewContainer->show();
 }
 
 PythonViewPluginFactory::PythonViewPluginFactory() :

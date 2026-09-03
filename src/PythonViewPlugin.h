@@ -4,8 +4,7 @@
 #include <ViewPlugin.h>
 
 #include <QString>
-
-class QWebEngineView;
+class QWidget;
 
 namespace mv::gui {
     class DropWidget;
@@ -17,6 +16,7 @@ class PythonViewPlugin final : public mv::plugin::ViewPlugin
 
 public:
     explicit PythonViewPlugin(const mv::plugin::PluginFactory* factory);
+    ~PythonViewPlugin() override;
 
     void init() override;
     void loadData(const mv::Datasets& datasets) override;
@@ -26,7 +26,8 @@ private:
     QString defaultScriptPath() const;
     void showError(const QString& title, const QString& details);
 
-    QWebEngineView* _webView = nullptr;
+    QWidget* _viewContainer = nullptr;
+    QWidget* _pythonWidget = nullptr;
     mv::gui::DropWidget* _dropWidget = nullptr;
     mv::Dataset<mv::DatasetImpl> _dataset;
     QString _scriptPath;
